@@ -1,0 +1,50 @@
+rm(list = ls())
+##############################################################
+## Download the whole flock of Audubon's 'Birds of America' ##
+##############################################################
+# https://www.audubon.org/birds-of-america#
+#
+# Packages #
+library(RCurl)
+library(XML)
+#
+# Set up directory to store .jpg files. Should take up ~ 2.5 gb of space
+dirFile <- "D:/Profiles/Scott/My pictures/BirdsOfAmerica/"
+#
+# Simple loop to parse XML from audubon.org and extract links to download hi-res images
+boa <- data.frame()
+for(i in 0:9){
+  html.raw <- getURL(
+    paste0("http://www.audubon.org/birds-of-america?sort_by=field_boa_plate_value&sort_order=ASC&page=",
+           i))
+  doc <- htmlTreeParse(html.raw,useInternalNodes=T)
+  img <- data.frame(xpathSApply(doc, "//img/@src"))
+  # lots of weird characters that need to be cleaned up
+  tt <- apply(img, 2, function(x) sub(".*?(?=Plate-)", "", x, perl = T))
+  tt <- apply(tt, 2, function(x) sub("(.jpg(.*))", ".jpg", x))
+  tt <- apply(tt, 2, function(x) sub("%28", "(", x))
+  tt <- apply(tt, 2, function(x) sub("%29", ")", x))
+  tt <- apply(tt, 2, function(x) sub("%27", "'", x))
+  tt <- apply(tt, 2, function(x) sub("%2C", ",", x))
+  tt <- apply(tt, 2, function(x) sub("%26", "&", x))
+  tt <- apply(tt, 2, function(x) sub("\\_[0-9]+", "", x))
+#
+  tt <- data.frame(NAME = tt[grep("Plate", tt)])
+  boa <- rbind(boa, tt)
+} # Close i loop
+#
+# Create the download link
+boa <- data.frame(URL = "https://df0bd6h5ujoev.cloudfront.net/",
+                  NAME = lapply(boa, as.character), stringsAsFactors = FALSE)
+boa$URLNAME <- paste0(boa$URL, boa$NAME)
+#
+# Simple loop to download all 435 plates. With a reasonable connection it should take less than 
+# an hour.
+for(j in 1:nrow(boa)){
+  download.file(url = boa[j,"URLNAME"],
+                destfile = paste0(dirFile, boa[j, "NAME"]),
+                mode = 'wb')
+  cat("Now saving", boa[j,"NAME"])
+} # Close j loop
+# 
+#
