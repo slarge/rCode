@@ -154,6 +154,8 @@ allList <- rbind(files, allList)
 # Loop to run through all folders on WKLife/Data and download InterCatch format data #
 ######################################################################################
 #
+# Enter stock name as j if you don't want to do the whole loop
+#
 for(j in unique(allList$STOCK)) {
   files <- as.character(allList$URLS[allList$STOCK == j])
   #
