@@ -30,9 +30,15 @@ library(reshape2)
 ######################
 # Load any functions #
 ######################
+#
+
 # Modified (and corrected) from Hans' code for stock coordinators#
 ReadIntercatch <- function(file){
-  IC <- read.table(file, sep = ",", col.names = as.character(1:33), fill=T, header = F)
+  IC <- read.table(file, sep = ",", 
+                   col.names = as.character(1:33),
+                   fill=T, 
+                   header = F, 
+                   stringsAsFactors = F)
   IC[IC == "-9"]  <- NA 
   HI <- subset(IC, X1 == 'HI')[,1:12]
   names(HI) <- c("RecordType", "Country", "Year", "SeasonType", "Season", "Fleet",
@@ -63,7 +69,7 @@ ReadIntercatch <- function(file){
   if(nrow(SD)>0){
     # Clean up some problems with factors and capitalization
     numCols <- c("MeanWeight", "NumberCaught", "AgeLength")
-    SD[, numCols] <- apply(SD[,numCols], 2, function(x) as.numeric(as.character(x)))
+    SD[, numCols] <- apply(SD[,numCols], 2, function(x) as.numeric(x))
     unitCols <- c("unitMeanWeight", "unitCANUM", "UnitAgeOrLength")
     SD[, unitCols] <- apply(SD[, unitCols], 2, function(x) tolower(x))
     SD[, unitCols] <- apply(SD[, unitCols], 2, function(x) gsub(x, pattern = " ", replacement = ""))
@@ -102,6 +108,7 @@ ReadIntercatch <- function(file){
 #
 dataDir <- "//community.ices.dk@SSL/DavWWWRoot/ExpertGroups/wklife/WKLIFE V/06. Data"
 allData <- list.files(dataDir)
+outDir <- paste0(dataDir, "/lengthFrequencyData/")
 #
 # Lists all files in the "06. Data" folder
 # allData <- c("anb-78", "ang-ivvi", "anp-78", "arg-123a4", "arg-5b6a",
@@ -114,7 +121,7 @@ allData <- list.files(dataDir)
 # List all folders within the "06. Data" folder, presumably, these hold the data we're after
 folders <- allData[!allData %in% grep(pattern = "\\.", x = allData, value = T) &
                    !allData %in% c("Data archive and documentation", "hom-soth", "ple-nsea", "sai-far", "sar-soth", "sol-nsea",
-                                    "Extra Stocks", "lengthFrequencyData")]
+                                    "Extra Stocks", "lengthFrequencyData", "nep-2324")]
 foldersURL <- paste0("https://community.ices.dk/ExpertGroups/wklife/WKLIFE%20V/06.%20Data",
                      "/",
                      gsub(pattern = " ", replacement =  "%20", folders))
@@ -129,7 +136,8 @@ NoNoList <- c(grep("\\.pdf", x = dataList, value = T),
               grep("\\.xls", x = dataList, value = T),
               grep("archive", x = dataList, value = T),
               grep("\\.doc", x = dataList, value = T),
-              grep("\\.zip", x = dataList, value = T))
+              grep("\\.zip", x = dataList, value = T),
+              grep("\\.msg", x = dataList, value = T))
 checkList <- c(grep("\\.xls", x = dataList, value = T),
                grep("\\.xlsx", x = dataList, value = T))
 checkList <- checkList[!checkList %in% c(grep("OtherSupporting", x = checkList, value = T),
@@ -154,8 +162,9 @@ allList <- rbind(files, allList)
 # Loop to run through all folders on WKLife/Data and download InterCatch format data #
 ######################################################################################
 #
-# Enter stock name as j if you don't want to do the whole loop
-#
+# j = "whg-iris"
+# file <- files[19]
+catchCat <- NULL
 for(j in unique(allList$STOCK)) {
   files <- as.character(allList$URLS[allList$STOCK == j])
   #
@@ -163,49 +172,72 @@ for(j in unique(allList$STOCK)) {
   faroeFiles <- files[files %in% grep("FaroeIslands", x = files, value = T )]
   files <- files[!files %in% faroeFiles]
   #
-  HI <- SI <- SD <- NULL
+  HI <- SI <- SD <- checkSD <- NULL
   for(file in files) {
     tmpFile <- tempfile()
     download.file(file, destfile = tmpFile, mode = "wb", quiet = F)
     if(file.info(tmpFile)$size == 0) { 
-      next(paste0(file, " does not seem to have any data.\n"))
+      checkSD <- rbind(checkSD, c(file, "emptyFile"))
+      cat(paste0("\n", file, " does not seem to have any data.\n"))
+      next()
     }
     ic <- ReadIntercatch(tmpFile)
     HI <- rbind(HI,ic[[1]])
     SI <- rbind(SI,ic[[2]])
     SD <- rbind(SD,ic[[3]])
+    #
+    # Create a record of the files not included in the length frequency
+    if(nrow(ic[[3]]) < 1) {
+      checkSD <- rbind(checkSD, c(file, "noSDdata"))
+    }
   }
   #
-  if(nrow(SD) < 1)
-    next(paste0(file, " has no valid SD data/n"))
-    
-  # Aggregate the data according to AgeLength and Year #
-  # Could also look at area, country, and discards/landings #
-  lens <- with(SD,
-                  aggregate(list(NumberCaught = NumberCaught),
-                                 list(
-                                   Year = Year,
-#                                     unitCANUM = unitCANUM,
-#                                     FishingArea = FishingArea,
-#                                     Country=Country,
-                                    Length = AgeLength),
-                                    sum))
-  #
-  # Transform the matrix into a more user-friendly output
-  lens <- dcast(lens, Year~Length, value.var = "NumberCaught")
-  lens$Year <- paste0("X", lens$Year)
-  lenFreq <- data.frame(matrix(NA, nrow = ncol(lens) - 1, ncol = length(lens$Year) + 1))
-  colnames(lenFreq) <- c("LENGTH", lens$Year)
-  lenFreq$LENGTH <- as.numeric(colnames(lens)[-1])  
-  lenFreq[,-1] <- as.numeric(t(lens)[-1,])
   interCatch <- list(HI, SI, SD)
-  #
-  # Save the:
-  # ~ lenFreq = length frequency data
-  # ~ interCatch = list with HI, SI, and SD information
-  # ~ files = list of URLs from SharePoint where data was downloaded from
-  save(lenFreq, interCatch, files, file = paste0("~/", j, "_allData.RDAT"))
-  write.csv(lenFreq, file = paste0("~/", j, "_lenFreq.csv"), row.names = F)
-  #
+  if(!is.null(checkSD)) {
+    colnames(checkSD) <- c("FileURL", "Message")
+  } else {
+    checkSD <- "all files have SD data"
+  }
+  
+  # If there is no sampling data, save as <stock>_noSampling.RDAT
+  if(nrow(SD) < 1) {    
+    save(interCatch, files, checkSD, file = paste0(outDir, j, "_noSampling.RDAT"))
+  } #close if statement: nrow(SD) < 1
+  if(nrow(SD) >= 1) {
+    # Aggregate the data according to AgeLength and Year #
+    # Could also look at area, country, and discards/landings #
+    catchCategory <- data.frame(STOCK = j, 
+                                CatchCategory = 
+                                ifelse(all(unique(SD$CatchCategory) == "L"), "Landings",
+                                         ifelse(all(unique(SD$CatchCategory) == "D"), "Discards",
+                                                "L+D")))
+    catchCat <- rbind(catchCat, catchCategory)
+    #
+    lens <- with(SD,
+                    aggregate(list(NumberCaught = NumberCaught),
+                                   list(
+                                     Year = Year,
+   #                                     CatchCategory = CatchCategory,
+   #                                     FishingArea = FishingArea,
+   #                                     Country=Country,
+                                      Length = AgeLength),
+                                      sum))
+    #
+    # Transform the matrix into a more user-friendly output
+    lens <- dcast(lens, Year~Length, value.var = "NumberCaught")
+    lens$Year <- paste0("X", lens$Year)
+    lenFreq <- data.frame(matrix(NA, nrow = ncol(lens) - 1, ncol = length(lens$Year) + 1))
+    colnames(lenFreq) <- c("LENGTH", lens$Year)
+    lenFreq$LENGTH <- as.numeric(colnames(lens)[-1])  
+    lenFreq[,-1] <- as.numeric(t(lens)[-1,])
+    #
+    # Save the:
+    # ~ lenFreq = length frequency data
+    # ~ interCatch = list with HI, SI, and SD information
+    # ~ files = list of URLs from SharePoint where data was downloaded
+    # ~ checkSD = list of file URLs with no SD for the stock
+    save(lenFreq, interCatch, files, checkSD, catchCategory, file = paste0(outDir, j, "_allData.RDAT"))
+    write.csv(lenFreq, file = paste0(outDir, j, "_lenFreq.csv"), row.names = F)
+  } #close if statement: nrow(SD) >= 1
 }
-
+write.csv(catchCat, file = paste0(outDir, "catchCategoryOverview.csv"), row.names = F)
